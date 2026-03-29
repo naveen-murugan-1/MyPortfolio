@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api' || 'https://myportfolio-nine-iota-33.vercel.app/api',
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api' || 'https://my-portfolio-dun-nine-30.vercel.app/api',
 });
 
 // Add a request interceptor
