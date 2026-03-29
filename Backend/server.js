@@ -1,4 +1,3 @@
-const path = require('path');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -13,52 +12,107 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware (CORS must be first)
-// Middleware (CORS must be first)
+// --------------------
+// CORS
+// --------------------
+const allowedOrigins = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://naveen-murugan-1.github.io',
+    'https://your-frontend.vercel.app' // replace this with your real frontend URL if needed
+];
+
 app.use(cors({
-    origin: ['http://localhost:5173', 'https://naveen-murugan-1.github.io/MyPortfolio/'],
+    origin: function (origin, callback) {
+        // Allow requests with no origin (Postman, mobile apps, curl, server-to-server)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        } else {
+            return callback(new Error(`CORS Error: Origin ${origin} not allowed`));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'auth-token']
 }));
 
-app.use(express.json());
+// --------------------
+// Core Middleware
+// --------------------
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
+// --------------------
 // Security Middleware
+// --------------------
 app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
-// app.use(mongoSanitize());
 
+app.use(mongoSanitize());
+
+// --------------------
 // Rate Limiting
+// --------------------
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 1000 // Increased for development
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000,
+    standardHeaders: true,
+    legacyHeaders: false
 });
+
 app.use('/api', limiter);
 
-// MongoDB Connection (Serverless optimized)
+// --------------------
+// MongoDB Connection (Serverless Optimized)
+// --------------------
 let isConnected = false;
+
 const connectDB = async () => {
     if (isConnected) return;
+
     try {
         const db = await mongoose.connect(process.env.MONGO_URI, {
             serverSelectionTimeoutMS: 5000,
         });
+
         isConnected = db.connections[0].readyState === 1;
-        // console.log(`Successfully connected to: ${process.env.MONGO_URI.split('@')[1] || 'Local instance'}`);
         console.log('MongoDB Connected');
     } catch (err) {
-        console.error('MongoDB Connection Error:', err);
+        console.error('MongoDB Connection Error:', err.message);
     }
 };
 
+// Connect DB before every request (safe for serverless)
 app.use(async (req, res, next) => {
     await connectDB();
     next();
 });
 
-// Routes
+// --------------------
+// Health Check Routes
+// --------------------
+app.get('/', (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: 'Backend is running 🚀'
+    });
+});
+
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        success: true,
+        database: isConnected ? 'connected' : 'disconnected',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
+
+// --------------------
+// API Routes
+// --------------------
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/about', require('./routes/about'));
 app.use('/api/projects', require('./routes/projects'));
@@ -73,20 +127,39 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/sociallinks', require('./routes/socialLinks'));
 app.use('/api/chat', require('./routes/chat'));
 
-// Serve Static Files from the frontend build directory
-app.use(express.static(path.join(__dirname, '../dist')));
-
-// For any routes that don't match our API, send back the index.html from dist
-app.get('/*path', (req, res) => {
-    // Check if it's an API route (if so, it shouldn't have matched any route above)
-    if (req.path.startsWith('/api')) {
-        return res.status(404).json({ message: 'API route not found' });
-    }
-    const indexPath = path.join(__dirname, '../dist/index.html');
-    res.sendFile(indexPath);
+// --------------------
+// API 404 Handler
+// --------------------
+app.use('/api', (req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'API route not found'
+    });
 });
 
-// Start Server
+// --------------------
+// Global Error Handler
+// --------------------
+app.use((err, req, res, next) => {
+    console.error('Server Error:', err.message);
+
+    // Handle CORS errors nicely
+    if (err.message && err.message.startsWith('CORS Error')) {
+        return res.status(403).json({
+            success: false,
+            message: err.message
+        });
+    }
+
+    res.status(500).json({
+        success: false,
+        message: 'Internal Server Error'
+    });
+});
+
+// --------------------
+// Start Server (Local Only)
+// --------------------
 if (require.main === module) {
     connectDB().then(() => {
         app.listen(PORT, () => {
